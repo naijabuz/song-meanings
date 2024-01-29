@@ -1,6 +1,7 @@
 import "./App.css";
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import axios from "axios";
+import OpenAI from "openai";
 
 // https://api.genius.com/search?q=${encodeURIComponent(artistName)}%20${encodeURIComponent(songTitle)}
 
@@ -8,6 +9,9 @@ function App() {
   const [artistName, SetArtistName] = useState("");
   const [songTitle, SetSongTitle] = useState("");
   const [lyrics, setLyrics] = useState("");
+  const [songMeaning, setSongMeaning] = useState("");
+  const [loading, SetLoading] = useState(false);
+  // const [song, setSong] = useState("");
 
   function handleArtistNameChange(e) {
     SetArtistName(e.target.value);
@@ -21,45 +25,100 @@ function App() {
     e.preventDefault();
 
     try {
-      // Replace 'YOUR_ACCESS_TOKEN' with the actual access token you obtained from Genius.com
-      const accessToken =
-        "VTULonDJEA6DxINCzTsREIRYTWq2bcovQllfHwrB5KrRsm9giel_X162nMpwWgAR";
-      const response = await axios.get(
-        `https://api.genius.com/search?q=${encodeURIComponent(
-          artistName
-        )}%20${encodeURIComponent(songTitle)}`,
+      const songSearchResponse = await axios.get(
+        `http://localhost:3000/api/song-search`,
         {
-          headers: {
-            Authorization: `Bearer ${accessToken}`,
-            "Content-Type": "application/json",
+          params: {
+            artistName,
+            songTitle,
           },
         }
       );
 
-      console.log("Genius API Response:", response);
+      const songSearchResponseData = songSearchResponse.data;
+      console.log("Song Search Response Data:", songSearchResponseData);
 
-      if (response.data.response.hits.length === 0) {
-        throw new Error("Song not found");
+      const songID =
+        songSearchResponseData.message.body.track_list[0].track.track_id;
+      console.log("Song ID:", songID);
+
+      try {
+        const songLyricsResponse = await axios.get(
+          `http://localhost:3000/api/get-lyrics`,
+          {
+            params: {
+              songID,
+            },
+          }
+        );
+
+        const songLyricsData = songLyricsResponse.data;
+        const songLyrics = songLyricsData.message.body.lyrics.lyrics_body;
+
+        console.log("Requested Song Lyrics:", songLyrics);
+
+        // OPENAI API CODE LOGIC BEGINNING
+        const openai = new OpenAI({
+          apiKey: "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",
+          dangerouslyAllowBrowser: true,
+        });
+
+        try {
+          SetLoading(true);
+          const songMeaningResponse = await openai.chat.completions.create({
+            model: "gpt-3.5-turbo",
+            messages: [
+              {
+                role: "system",
+                content:
+                  "You are a well rounded music analyst, song meanings explanations expert and music intrepreter",
+              },
+              {
+                role: "user",
+                content: `Explain the meaning of this song "${songTitle}" by "${artistName}". This is the lyrics: "${songLyrics}"`,
+              },
+            ],
+            temperature: 1,
+            max_tokens: 232,
+            top_p: 1,
+            frequency_penalty: 0,
+            presence_penalty: 0,
+          });
+
+          setSongMeaning(songMeaningResponse.choices[0].message.content);
+
+          console.log("The meaning of the song is: ", songMeaning);
+          SetLoading(false);
+        } catch (error) {
+          SetLoading(false);
+          if (error.response) {
+            console.log(`OpenAI - The Error Data is: ${error.response.data}`);
+            console.log(
+              `OpenAI - The Error Status is: ${error.response.status}`
+            );
+            console.log(
+              `OpenAI - The Error Headers are: ${error.response.headers}`
+            );
+            console.log(error.response);
+          } else {
+            console.log(
+              `OpenAI Error Message recieved due to error.response been false: ${error.message}`
+            );
+          }
+        }
+      } catch (error) {
+        console.log("Error Getting Lyrics:", error.response);
+        console.log("Error Getting Lyrics:", error.message);
       }
-
-      // Assuming the first search result contains the desired song
-      const songId = response.data.response.hits[0].result.id;
-      const lyricsResponse = await axios.get(
-        `https://api.genius.com/songs/${songId}/lyrics`,
-        {
-          headers: {
-            Authorization: `Bearer ${accessToken}`,
-            "Content-Type": "application/json",
-          },
-        }
-      );
-
-      setLyrics(lyricsResponse.data.response.lyrics.body);
     } catch (error) {
-      console.error("Error fetching lyrics:", error.message);
+      if (error.response) {
+        console.log("Error Getting Song:", error.response);
+        console.log("Error Getting Song:", error.response.status);
+      } else {
+        console.log("Error Getting Song:", error.message);
+      }
     }
   };
-
   return (
     <main>
       <h1 className="mb-7 capitalize lg:text-[50px] text-[35px] font-bold max-w-[800px]">
